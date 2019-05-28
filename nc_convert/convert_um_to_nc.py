@@ -12,6 +12,8 @@ import iris
 from iris.coord_systems import GeogCS
 from iris.util import guess_coord_axis
 
+import xarray as xr
+
 
 """
 Mainly filter some user warning such as:
@@ -153,7 +155,8 @@ class Transformer(object):
             if cube.name() == 'canopy_water_amount':
                 cube.units = 'kg m-2'
 
-    def save(self, fname, nc_type):
+
+    def save(self, fname, nc_type, compress=True, complevel=4):
         # Future versions of Iris change their defaults. We enable the new
         # defaults here to simplify future compatibility.
         # iris.FUTURE.netcdf_no_unlimited = True
@@ -174,8 +177,8 @@ class Transformer(object):
                 if nc_type == 'NETCDF4':
                     iris.save(self._cubes, tmp_fname,
                               saver=iris.fileformats.netcdf.save,
-                              netcdf_format=nc_type,)
-                #              zlib=True)
+                              netcdf_format=nc_type,
+                              zlib=compress, complevel=complevel)
                 elif nc_type == 'NETCDF3_CLASSIC':
                     # Note: no compression is avail for nc3
                     iris.save(self._cubes, tmp_fname,
@@ -186,13 +189,49 @@ class Transformer(object):
                         'Not the available nc_type to convert!')
             logging.info(output_fpath + ' is saved')
 
+    def save_xarray(self, fname, engine='netcdf4', encoding=dict(zlib=True, complevel=4)):
+        # Future versions of Iris change their defaults. We enable the new
+        # defaults here to simplify future compatibility.
+        # iris.FUTURE.netcdf_no_unlimited = True
+
+        basedir = os.path.abspath(os.path.dirname(fname))
+        if not os.path.isdir(basedir):
+            os.makedirs(basedir)
+
+        if not self._cubes:
+            # Touch the file
+            with open(fname, 'a'):
+                os.utime(fname, None)
+        else:
+            output_fpath = fname
+            print("Saving the NetCDF file now ...")
+            with inprogress_fname(output_fpath) as tmp_fname:
+                vars = []
+                for cube in self._cubes:
+                    try:
+                        vars.append(xr.DataArray.from_iris(cube))
+                    except Error as e:
+                        print(e)
+                        print('Failed to convert ')
+                        print(cube)
+                ds = xr.merge(vars)
+                # ds = xr.concat([xr.DataArray.from_iris(cube) for cube in self._cubes])
+                print(ds)
+                ds.to_netcdf(tmp_fname, engine=engine, encoding={var: encoding for var in ds.data_vars})
+            logging.info(output_fpath + ' is saved')
+
 
 def transform(input_fpath, output_fpath, nc_type):
     t = Transformer()
     t.load(input_fpath)
     t.transform()
-    t.save(output_fpath, nc_type)
-
+    # t.save(output_fpath, nc_type)
+    # t.save(output_fpath, nc_type, compress=False, complevel=0)
+    t.save(output_fpath, nc_type, complevel=1)
+    # t.save_xarray(output_fpath, encoding={})
+    # t.save_xarray(output_fpath, encoding={'zlib':True, 'complevel':1})
+    # t.save_xarray(output_fpath, engine='h5netcdf', encoding={})
+    # t.save_xarray(output_fpath, engine='h5netcdf', encoding={'zlib':True, 'complevel':1})
 
 if __name__ == '__main__':
     main()
